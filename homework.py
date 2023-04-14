@@ -145,6 +145,7 @@ def main():
                 continue
 
             message = parse_status(homeworks[0])
+
             if last_message != message:
                 send_message(bot, message)
                 last_message = message
