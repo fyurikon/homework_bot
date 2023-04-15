@@ -1,7 +1,9 @@
+import json
 import logging
 import os
 import sys
 import time
+from http import HTTPStatus
 
 import requests
 import telegram
@@ -11,16 +13,6 @@ import exceptions
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    handlers=[
-        logging.FileHandler(
-            filename='homework.log', mode='w', encoding='UTF-8'),
-        logging.StreamHandler(stream=sys.stdout)
-    ],
-    format='%(asctime)s, %(levelname)s, %(message)s, %(name)s'
-)
-
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
@@ -28,6 +20,8 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 RETRY_PERIOD = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
+
+ONE_MONTH: int = 2629743
 
 
 HOMEWORK_VERDICTS = {
@@ -41,10 +35,13 @@ REQUIRED_TOKENS = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
 
 def check_tokens():
     """Check that all tokens are available."""
-    for token in REQUIRED_TOKENS:
-        if globals()[token] is None:
-            logging.critical(f'No token -{token}- found')
-            raise ValueError(f'{token} is missing.')
+    if not all(globals()[token] for token in REQUIRED_TOKENS):
+        missing_tokens = [
+            token for token in REQUIRED_TOKENS if globals()[token] is None
+        ]
+        error_msg = f"Missing tokens: {', '.join(missing_tokens)}"
+        logging.critical(error_msg)
+        raise ValueError(error_msg)
 
 
 def send_message(bot, message):
@@ -71,12 +68,16 @@ def get_api_answer(timestamp):
             f'Connection failed: {error}'
         )
 
-    if response.status_code != 200:
+    if response.status_code != HTTPStatus.OK:
         raise exceptions.ApiResponseFailed(
             f'Failed get answer from API. Status code = {response.status_code}'
         )
 
-    response_json = response.json()
+    try:
+        response_json = response.json()
+    except json.JSONDecodeError as error:
+        print(f"Failed to decode JSON response: {error}")
+        response_json = None
 
     return response_json
 
@@ -133,7 +134,7 @@ def main():
     check_tokens()
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    timestamp = int(time.time())
+    timestamp = int(time.time()) - ONE_MONTH
     last_message = ''
 
     while True:
@@ -145,24 +146,29 @@ def main():
                 continue
 
             message = parse_status(homeworks[0])
-
-            if last_message != message:
-                send_message(bot, message)
-                last_message = message
-                timestamp = response.get('current_date', timestamp)
+            send_message(bot, message)
+            last_message = message
         except Exception as error:
             message = f'Program failed: {error}'
             logging.exception(message)
 
             if last_message != message:
-                try:
-                    send_message(bot, message)
-                    last_message = message
-                except Exception as error:
-                    logging.exception(f'Failed to send error message: {error}')
+                send_message(bot, message)
+                last_message = message
         finally:
+            timestamp = response.get('current_date', timestamp)
             time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.DEBUG,
+        handlers=[
+            logging.FileHandler(
+                filename='homework.log', mode='w', encoding='UTF-8'),
+            logging.StreamHandler(stream=sys.stdout)
+        ],
+        format='%(asctime)s, %(levelname)s, %(message)s, %(name)s'
+    )
+
     main()
