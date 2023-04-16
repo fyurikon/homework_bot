@@ -76,8 +76,8 @@ def get_api_answer(timestamp):
     try:
         response_json = response.json()
     except json.JSONDecodeError as error:
-        print(f"Failed to decode JSON response: {error}")
-        response_json = None
+        logging.exception(f"Failed to decode JSON response: {error}")
+        raise ValueError(f"Failed to decode JSON response: {error}")
 
     return response_json
 
@@ -142,12 +142,12 @@ def main():
             response = get_api_answer(timestamp)
             homeworks = check_response(response)
 
-            if not homeworks:
-                continue
+            if homeworks:
+                message = parse_status(homeworks[0])
+                send_message(bot, message)
+                last_message = message
 
-            message = parse_status(homeworks[0])
-            send_message(bot, message)
-            last_message = message
+            timestamp = response.get('current_date', timestamp)
         except Exception as error:
             message = f'Program failed: {error}'
             logging.exception(message)
@@ -156,7 +156,6 @@ def main():
                 send_message(bot, message)
                 last_message = message
         finally:
-            timestamp = response.get('current_date', timestamp)
             time.sleep(RETRY_PERIOD)
 
 
